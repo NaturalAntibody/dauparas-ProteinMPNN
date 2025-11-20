@@ -5,7 +5,9 @@ from typing import TextIO
 import torch
 
 from dauparas_proteinmpnn.io import Structure, parse_pdb, select_chains
-from dauparas_proteinmpnn.protein_mpnn_utils import tied_featurize as tied_featurize_orig
+from dauparas_proteinmpnn.protein_mpnn_utils import (
+    tied_featurize as tied_featurize_orig,
+)
 
 ALPHABET = "ACDEFGHIKLMNPQRSTVWYX"
 ALPHABET_DICT = dict(zip(ALPHABET, range(21)))
@@ -122,9 +124,12 @@ def get_fixed_positions_dict(
     for chain_id, seq in seq_chains.items():
         all_positions = set(range(1, len(seq) + 1))
         if chain_id in chain_designed_positions:
-            designed_postitions = set(chain_designed_positions[chain_id])
-            fixed_postions = list(all_positions - designed_postitions)
-            res[chain_id] = fixed_postions
+            if chain_designed_positions[chain_id] is None:
+                designed_positions = all_positions
+            else:
+                designed_positions = set(chain_designed_positions[chain_id])
+            fixed_positions = list(all_positions - designed_positions)
+            res[chain_id] = fixed_positions
         else:
             res[chain_id] = list(all_positions)
     return {protein["name"]: res}
