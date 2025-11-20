@@ -1,7 +1,7 @@
 from argparse import Namespace
 import os
 from score import run_scoring
-from proteinmpnn.config import DATA_PATH, HER2_LARGE_PATH, RESULTS_PATH
+from dauparas_proteinmpnn.config import DATA_PATH, HER2_LARGE_PATH, RESULTS_PATH
 from models import MODEL_PATHS
 
 DATASETS = {

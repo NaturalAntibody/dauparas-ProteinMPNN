@@ -7,7 +7,7 @@ import json
 import multiprocessing as mp
 import psutil
 
-from proteinmpnn.io import parse_pdb
+from dauparas_proteinmpnn.io import parse_pdb
 
 
 def worker(pdb_path: Path) -> str:

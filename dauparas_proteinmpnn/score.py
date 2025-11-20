@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 
-from proteinmpnn.featurize import TiedFeaturizeResult
+from dauparas_proteinmpnn.featurize import TiedFeaturizeResult
 
 
 @dataclass

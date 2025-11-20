@@ -4,8 +4,8 @@ import torch
 from torch.nn import Module
 from tqdm import tqdm
 
-from proteinmpnn.featurize import ALPHABET, TiedFeaturizeResult
-from proteinmpnn.protein_mpnn_utils import _S_to_seq
+from dauparas_proteinmpnn.featurize import ALPHABET, TiedFeaturizeResult
+from dauparas_proteinmpnn.protein_mpnn_utils import _S_to_seq
 
 
 def sample(

@@ -4,8 +4,8 @@ from typing import TextIO
 
 import torch
 
-from proteinmpnn.io import Structure, parse_pdb, select_chains
-from proteinmpnn.protein_mpnn_utils import tied_featurize as tied_featurize_orig
+from dauparas_proteinmpnn.io import Structure, parse_pdb, select_chains
+from dauparas_proteinmpnn.protein_mpnn_utils import tied_featurize as tied_featurize_orig
 
 ALPHABET = "ACDEFGHIKLMNPQRSTVWYX"
 ALPHABET_DICT = dict(zip(ALPHABET, range(21)))

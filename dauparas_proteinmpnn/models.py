@@ -3,7 +3,7 @@ from pathlib import Path
 from .protein_mpnn_utils import ProteinMPNN
 import torch
 
-from proteinmpnn.config import ABMPNN_WEIGHTS_PATH, DEFAULT_PROTEINMPNN_WEIGHTS_PATH
+from dauparas_proteinmpnn.config import ABMPNN_WEIGHTS_PATH, DEFAULT_PROTEINMPNN_WEIGHTS_PATH
 
 
 def load_model(checkpoint_path: Path, device: torch.device = torch.device("cuda:0"), ca_only: bool = False, backbone_noise=0.0) -> ProteinMPNN:
