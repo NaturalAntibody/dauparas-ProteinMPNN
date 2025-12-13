@@ -1,7 +1,9 @@
-from collections import namedtuple
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+import numpy as np
 import torch
 
 from dauparas_proteinmpnn.io import Structure, parse_pdb, select_chains
@@ -12,31 +14,54 @@ from dauparas_proteinmpnn.protein_mpnn_utils import (
 ALPHABET = "ACDEFGHIKLMNPQRSTVWYX"
 ALPHABET_DICT = dict(zip(ALPHABET, range(21)))
 
-TiedFeaturizeResult = namedtuple(
-    "TiedFeaturizeResult",
-    [
-        "X",
-        "S",
-        "mask",
-        "lengths",
-        "chain_M",
-        "chain_encoding_all",
-        "chain_list_list",
-        "visible_list_list",
-        "masked_list_list",
-        "masked_chain_length_list_list",
-        "chain_M_pos",
-        "omit_AA_mask",
-        "residue_idx",
-        "dihedral_mask",
-        "tied_pos_list_of_lists_list",
-        "pssm_coef",
-        "pssm_bias",
-        "pssm_log_odds_all",
-        "bias_by_res_all",
-        "tied_beta",
-    ],
-)
+
+@dataclass
+class TiedFeaturizeResult:
+    X: torch.Tensor
+    S: torch.Tensor
+    mask: torch.Tensor
+    lengths: np.ndarray
+    chain_M: torch.Tensor
+    chain_encoding_all: torch.Tensor
+    chain_list_list: list
+    visible_list_list: list
+    masked_list_list: list
+    masked_chain_length_list_list: list
+    chain_M_pos: torch.Tensor
+    omit_AA_mask: torch.Tensor
+    residue_idx: torch.Tensor
+    dihedral_mask: torch.Tensor
+    tied_pos_list_of_lists_list: list
+    pssm_coef: torch.Tensor
+    pssm_bias: torch.Tensor
+    pssm_log_odds_all: torch.Tensor
+    bias_by_res_all: torch.Tensor
+    tied_beta: torch.Tensor
+
+    def clone(self) -> "TiedFeaturizeResult":
+        """Create a deep copy of the TiedFeaturizeResult object."""
+        return TiedFeaturizeResult(
+            X=self.X.clone(),
+            S=self.S.clone(),
+            mask=self.mask.clone(),
+            lengths=self.lengths.copy(),
+            chain_M=self.chain_M.clone(),
+            chain_encoding_all=self.chain_encoding_all.clone(),
+            chain_list_list=deepcopy(self.chain_list_list),
+            visible_list_list=deepcopy(self.visible_list_list),
+            masked_list_list=deepcopy(self.masked_list_list),
+            masked_chain_length_list_list=deepcopy(self.masked_chain_length_list_list),
+            chain_M_pos=self.chain_M_pos.clone(),
+            omit_AA_mask=self.omit_AA_mask.clone(),
+            residue_idx=self.residue_idx.clone(),
+            dihedral_mask=self.dihedral_mask.clone(),
+            tied_pos_list_of_lists_list=deepcopy(self.tied_pos_list_of_lists_list),
+            pssm_coef=self.pssm_coef.clone(),
+            pssm_bias=self.pssm_bias.clone(),
+            pssm_log_odds_all=self.pssm_log_odds_all.clone(),
+            bias_by_res_all=self.bias_by_res_all.clone(),
+            tied_beta=self.tied_beta.clone(),
+        )
 
 
 def tied_featurize(
@@ -50,19 +75,18 @@ def tied_featurize(
     bias_by_res_dict=None,
     ca_only=False,
 ) -> TiedFeaturizeResult:
-    return TiedFeaturizeResult(
-        *tied_featurize_orig(
-            batch,
-            device,
-            chain_dict,
-            fixed_position_dict=fixed_position_dict,
-            omit_AA_dict=omit_AA_dict,
-            tied_positions_dict=tied_positions_dict,
-            pssm_dict=pssm_dict,
-            bias_by_res_dict=bias_by_res_dict,
-            ca_only=ca_only,
-        )
+    result_tuple = tied_featurize_orig(
+        batch,
+        device,
+        chain_dict,
+        fixed_position_dict=fixed_position_dict,
+        omit_AA_dict=omit_AA_dict,
+        tied_positions_dict=tied_positions_dict,
+        pssm_dict=pssm_dict,
+        bias_by_res_dict=bias_by_res_dict,
+        ca_only=ca_only,
     )
+    return TiedFeaturizeResult(*result_tuple)
 
 
 def featurize_pdb(

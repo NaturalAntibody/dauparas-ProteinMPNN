@@ -240,13 +240,14 @@ if __name__ == "__main__":
     print("Individual scoring:")
     individual_features = []
     individual_results = []
-    for i, seq in enumerate(sequences):
-        feat = featurize_pdb(
+    features = featurize_pdb(
             Path("./data/1N8Z_normalized.pdb"),
             designed_chains=[score_chain_id],
             fixed_chains=fixed_chains,
             device=device,
         )
+    for i, seq in enumerate(sequences):
+        feat = features.clone()
         feat = encode_sequence(feat, seq)
         individual_features.append(feat)
         result = score_deterministic(model, feat, positions_to_score=None)
