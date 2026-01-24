@@ -190,6 +190,10 @@ def parse_PDB(path_to_pdb, input_chain_list=None, ca_only=False):
 
 def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_dict=None, tied_positions_dict=None, pssm_dict=None, bias_by_res_dict=None, ca_only=False):
     """ Pack and pad batch into torch tensors """
+    
+    # ============================================================================
+    # SECTION 1: Initialize batch dimensions and allocate output tensors
+    # ============================================================================
     alphabet = 'ACDEFGHIKLMNPQRSTVWYX'
     B = len(batch)
     lengths = np.array([len(b['seq']) for b in batch], dtype=np.int32) #sum of chain seq lengths
@@ -208,7 +212,10 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
     chain_encoding_all = np.zeros([B, L_max], dtype=np.int32) #1.0 for the bits that need to be predicted
     S = np.zeros([B, L_max], dtype=np.int32)
     omit_AA_mask = np.zeros([B, L_max, len(alphabet)], dtype=np.int32)
-    # Build the batch
+    
+    # ============================================================================
+    # SECTION 2: Determine which chains to mask (design) vs keep visible (context)
+    # ============================================================================
     letter_list_list = []
     visible_list_list = []
     masked_list_list = []
@@ -223,6 +230,10 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
         masked_chains.sort() #sort masked_chains 
         visible_chains.sort() #sort visible_chains 
         all_chains = masked_chains + visible_chains
+    
+    # ============================================================================
+    # SECTION 3: Process each sample in batch - extract chains and build features
+    # ============================================================================
     for i, b in enumerate(batch):
         mask_dict = {}
         a = 0
@@ -244,6 +255,10 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
         bias_by_res_list = []
         l0 = 0
         l1 = 0
+        
+        # ------------------------------------------------------------------------
+        # SECTION 3A: Process visible chains (context - not designed)
+        # ------------------------------------------------------------------------
         for step, letter in enumerate(all_chains):
             if letter in visible_chains:
                 letter_list.append(letter)
@@ -279,6 +294,10 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 pssm_bias_list.append(pssm_bias)
                 pssm_log_odds_list.append(pssm_log_odds)
                 bias_by_res_list.append(np.zeros([chain_length, 21]))
+            
+            # ------------------------------------------------------------------------
+            # SECTION 3B: Process masked chains (to be designed/predicted)
+            # ------------------------------------------------------------------------
             if letter in masked_chains:
                 masked_list.append(letter)
                 letter_list.append(letter)
@@ -333,7 +352,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                 else:
                     bias_by_res_list.append(np.zeros([chain_length, 21]))
 
-       
+        # ------------------------------------------------------------------------
+        # SECTION 3C: Handle tied positions (positions that should have same AA)
+        # ------------------------------------------------------------------------
         letter_list_np = np.array(letter_list)
         tied_pos_list_of_lists = []
         tied_beta = np.ones(L_max)
@@ -355,8 +376,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
                     tied_pos_list_of_lists.append(one_list)
         tied_pos_list_of_lists_list.append(tied_pos_list_of_lists)
 
-
- 
+        # ------------------------------------------------------------------------
+        # SECTION 3D: Concatenate all chain data into single arrays for this sample
+        # ------------------------------------------------------------------------
         x = np.concatenate(x_chain_list,0) #[L, 4, 3]
         all_sequence = "".join(chain_seq_list)
         m = np.concatenate(chain_mask_list,0) #[L,], 1.0 for places that need to be predicted
@@ -369,6 +391,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
 
         bias_by_res_ = np.concatenate(bias_by_res_list, 0)  #[L,21], 0.0 for places where AA frequencies don't need to be tweaked
 
+        # ------------------------------------------------------------------------
+        # SECTION 3E: Pad sequences to max length and store in batch arrays
+        # ------------------------------------------------------------------------
         l = len(all_sequence)
         x_pad = np.pad(x, [[0,L_max-l], [0,0], [0,0]], 'constant', constant_values=(np.nan, ))
         X[i,:,:,:] = x_pad
@@ -394,7 +419,9 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
         bias_by_res_pad = np.pad(bias_by_res_, [[0,L_max-l], [0,0]], 'constant', constant_values=(0.0, ))
         bias_by_res_all[i,:] = bias_by_res_pad
 
-        # Convert to labels
+        # ------------------------------------------------------------------------
+        # SECTION 3F: Convert amino acid sequences to integer labels
+        # ------------------------------------------------------------------------
         indices = np.asarray([alphabet.index(a) for a in all_sequence], dtype=np.int32)
         S[i, :l] = indices
         letter_list_list.append(letter_list)
@@ -402,18 +429,25 @@ def tied_featurize(batch, device, chain_dict, fixed_position_dict=None, omit_AA_
         masked_list_list.append(masked_list)
         masked_chain_length_list_list.append(masked_chain_length_list)
 
-
+    # ============================================================================
+    # SECTION 4: Handle missing coordinates and convert to PyTorch tensors
+    # ============================================================================
     isnan = np.isnan(X)
     mask = np.isfinite(np.sum(X,(2,3))).astype(np.float32)
     X[isnan] = 0.
 
-    # Conversion
+    # ------------------------------------------------------------------------
+    # SECTION 4A: Convert all numpy arrays to PyTorch tensors on device
+    # ------------------------------------------------------------------------
     pssm_coef_all = torch.from_numpy(pssm_coef_all).to(dtype=torch.float32, device=device)
     pssm_bias_all = torch.from_numpy(pssm_bias_all).to(dtype=torch.float32, device=device)
     pssm_log_odds_all = torch.from_numpy(pssm_log_odds_all).to(dtype=torch.float32, device=device)
 
     tied_beta = torch.from_numpy(tied_beta).to(dtype=torch.float32, device=device)
 
+    # ------------------------------------------------------------------------
+    # SECTION 4B: Create masks for dihedral angles (phi, psi, omega)
+    # ------------------------------------------------------------------------
     jumps = ((residue_idx[:,1:]-residue_idx[:,:-1])==1).astype(np.float32)
     bias_by_res_all = torch.from_numpy(bias_by_res_all).to(dtype=torch.float32, device=device)
     phi_mask = np.pad(jumps, [[0,0],[1,0]])
