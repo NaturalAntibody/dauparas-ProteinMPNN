@@ -1,0 +1,36 @@
+{
+  "designed_chains": [
+    "H"
+  ],
+  "fixed_chains": [
+    "L"
+  ],
+  "structure": "/home/bartosz.janusz/antifold-interface/data/input_files/5GGS_standardized.pdb",
+  "device": "cpu",
+  "chain_dict": {
+    "/home/bartosz.janusz/antifold-interface/data/input_files/5GGS_standardized.pdb": [
+      [
+        "H"
+      ],
+      [
+        "L"
+      ]
+    ]
+  },
+  "fixed_position_dict": {
+    "/home/bartosz.janusz/antifold-interface/data/input_files/5GGS_standardized.pdb": {
+      "H": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ]
+    }
+  }
+}
