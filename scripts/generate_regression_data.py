@@ -1,4 +1,4 @@
-"""Generate regression test data for tied_featurize_orig function."""
+"""Generate regression test data for tied_featurize function."""
 
 from pathlib import Path
 import json
@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from dauparas_proteinmpnn.io import parse_pdb, select_chains
-from dauparas_proteinmpnn.featurize import tied_featurize_orig as tied_featurize
+from dauparas_proteinmpnn.featurize import tied_featurize
 
 # Path to test PDB
 PDB_PATH = Path("/home/bartosz.janusz/antifold-interface/data/input_files/5GGS_standardized.pdb")

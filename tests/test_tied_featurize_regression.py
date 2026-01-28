@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import torch
 
-from dauparas_proteinmpnn.io import parse_pdb, select_chains
-from dauparas_proteinmpnn.featurize import tied_featurize_orig as tied_featurize
+from dauparas_proteinmpnn.io import parse_pdb, select_chains, Structure
+from dauparas_proteinmpnn.featurize import tied_featurize, Protein
 
 
 # Paths
@@ -33,10 +33,35 @@ def structure():
         return parse_pdb(f)
 
 
-def prepare_structure_for_chains(structure: dict, designed_chains: list[str], fixed_chains: list[str]) -> dict:
+def prepare_structure_for_chains(structure: Structure, designed_chains: list[str], fixed_chains: list[str]) -> Structure:
     """Helper to select only the chains we're working with."""
     all_chains = designed_chains + fixed_chains
     return select_chains(structure, all_chains)
+
+
+def create_protein(
+    structure: Structure,
+    designed_chains: list[str],
+    fixed_chains: list[str] | None = None,
+    fixed_positions: dict[str, list[int]] | None = None,
+    omit_aa: dict[str, list[tuple[np.ndarray, list[str]]]] | None = None,
+    tied_positions: list[dict[str, list[int] | list[list[int]]]] | None = None,
+    pssm: dict[str, dict[str, np.ndarray] | None] | None = None,
+    bias_by_res: dict[str, np.ndarray] | None = None,
+) -> Protein:
+    """Helper to create a Protein object from structure and parameters."""
+    if fixed_chains is None:
+        fixed_chains = []
+    return Protein(
+        structure=structure,
+        masked_chains=designed_chains,
+        visible_chains=fixed_chains,
+        fixed_positions=fixed_positions,
+        omit_aa=omit_aa,
+        tied_positions=tied_positions,
+        pssm=pssm,
+        bias_by_res=bias_by_res,
+    )
 
 
 def load_regression_data(test_case_name: str) -> tuple:
@@ -106,8 +131,21 @@ def assert_lists_equal(actual: list, expected: list, name: str):
     assert actual == expected, f"{name}: Lists don't match - actual {actual} vs expected {expected}"
 
 
-def assert_outputs_equal(actual_outputs: tuple, expected_outputs: tuple):
+def assert_outputs_equal(actual_outputs, expected_outputs: tuple):
     """Assert all outputs match exactly."""
+    from dauparas_proteinmpnn.featurize import BatchFeatures
+    
+    # Convert BatchFeatures dataclass to tuple if needed
+    if isinstance(actual_outputs, BatchFeatures):
+        actual_outputs = (
+            actual_outputs.X, actual_outputs.S, actual_outputs.mask, actual_outputs.lengths,
+            actual_outputs.chain_M, actual_outputs.chain_encoding_all, actual_outputs.chain_list_list,
+            actual_outputs.visible_list_list, actual_outputs.masked_list_list, actual_outputs.masked_chain_length_list_list,
+            actual_outputs.chain_M_pos, actual_outputs.omit_AA_mask, actual_outputs.residue_idx, actual_outputs.dihedral_mask,
+            actual_outputs.tied_pos_list_of_lists_list, actual_outputs.pssm_coef, actual_outputs.pssm_bias, 
+            actual_outputs.pssm_log_odds_all, actual_outputs.bias_by_res_all, actual_outputs.tied_beta
+        )
+    
     output_names = [
         "X", "S", "mask", "lengths", "chain_M", "chain_encoding_all", "chain_list_list",
         "visible_list_list", "masked_list_list", "masked_chain_length_list_list",
@@ -137,10 +175,10 @@ class TestRegressionBasic:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        chain_dict = {structure_filtered["name"]: (designed_chains, fixed_chains)}
+        chain_dict = {structure_filtered.name: (designed_chains, fixed_chains)}
         
         # Compute current output
-        actual = tied_featurize([structure_filtered], device, chain_dict)
+        actual = tied_featurize([create_protein(structure_filtered, designed_chains, fixed_chains)], device)
         
         # Load expected output
         expected = load_regression_data("basic_single_chain_design")
@@ -153,10 +191,10 @@ class TestRegressionBasic:
         designed_chains = ["H", "L"]
         fixed_chains = []
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        chain_dict = {structure_filtered["name"]: (designed_chains, fixed_chains)}
+        chain_dict = {structure_filtered.name: (designed_chains, fixed_chains)}
         
         # Compute current output
-        actual = tied_featurize([structure_filtered], device, chain_dict)
+        actual = tied_featurize([create_protein(structure_filtered, designed_chains, fixed_chains)], device)
         
         # Load expected output
         expected = load_regression_data("basic_multi_chain_design")
@@ -169,10 +207,9 @@ class TestRegressionBasic:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        chain_dict = {structure_filtered["name"]: (designed_chains, fixed_chains)}
         
         # Compute current output
-        actual = tied_featurize([structure_filtered], device, chain_dict, ca_only=True)
+        actual = tied_featurize([create_protein(structure_filtered, designed_chains, fixed_chains)], device, ca_only=True)
         
         # Load expected output
         expected = load_regression_data("ca_only_mode")
@@ -189,16 +226,12 @@ class TestRegressionFixedPositions:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        protein_name = structure_filtered["name"]
-        chain_dict = {protein_name: (designed_chains, fixed_chains)}
-        fixed_position_dict = {protein_name: {"H": list(range(1, 11))}}
+        fixed_positions = {"H": list(range(1, 11))}
         
         # Compute current output
         actual = tied_featurize(
-            [structure_filtered], 
-            device, 
-            chain_dict,
-            fixed_position_dict=fixed_position_dict
+            [create_protein(structure_filtered, designed_chains, fixed_chains, fixed_positions=fixed_positions)], 
+            device
         )
         
         # Load expected output
@@ -216,22 +249,16 @@ class TestRegressionOmitAA:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        protein_name = structure_filtered["name"]
-        chain_dict = {protein_name: (designed_chains, fixed_chains)}
-        omit_AA_dict = {
-            protein_name: {
-                "H": [
-                    (np.array([5, 10, 15]), ["C", "M"]),
-                ]
-            }
+        omit_aa = {
+            "H": [
+                (np.array([5, 10, 15]), ["C", "M"]),
+            ]
         }
         
         # Compute current output
         actual = tied_featurize(
-            [structure_filtered],
-            device,
-            chain_dict,
-            omit_AA_dict=omit_AA_dict
+            [create_protein(structure_filtered, designed_chains, fixed_chains, omit_aa=omit_aa)],
+            device
         )
         
         # Load expected output
@@ -249,20 +276,14 @@ class TestRegressionTiedPositions:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        protein_name = structure_filtered["name"]
-        chain_dict = {protein_name: (designed_chains, fixed_chains)}
-        tied_positions_dict = {
-            protein_name: [
-                {"H": [10, 20, 30]}
-            ]
-        }
+        tied_positions = [
+            {"H": [10, 20, 30]}
+        ]
         
         # Compute current output
         actual = tied_featurize(
-            [structure_filtered],
-            device,
-            chain_dict,
-            tied_positions_dict=tied_positions_dict
+            [create_protein(structure_filtered, designed_chains, fixed_chains, tied_positions=tied_positions)],
+            device
         )
         
         # Load expected output
@@ -280,37 +301,22 @@ class TestRegressionPSSM:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        protein_name = structure_filtered["name"]
-        chain_dict = {protein_name: (designed_chains, fixed_chains)}
-        seq_len_H = len(structure_filtered["seq_chain_H"])
-        pssm_dict = {
-            protein_name: {
-                "H": {
-                    "pssm_coef": np.ones(seq_len_H) * 0.5,
-                    "pssm_bias": np.random.randn(seq_len_H, 21) * 0.1,
-                    "pssm_log_odds": np.random.randn(seq_len_H, 21) * 2.0,
-                }
-            }
-        }
+        seq_len_H = len(structure_filtered.chains["H"].seq)
         
         # Note: PSSM uses random values, so we need to set seed for reproducibility
         np.random.seed(42)
-        pssm_dict = {
-            protein_name: {
-                "H": {
-                    "pssm_coef": np.ones(seq_len_H) * 0.5,
-                    "pssm_bias": np.random.randn(seq_len_H, 21) * 0.1,
-                    "pssm_log_odds": np.random.randn(seq_len_H, 21) * 2.0,
-                }
+        pssm = {
+            "H": {
+                "pssm_coef": np.ones(seq_len_H) * 0.5,
+                "pssm_bias": np.random.randn(seq_len_H, 21) * 0.1,
+                "pssm_log_odds": np.random.randn(seq_len_H, 21) * 2.0,
             }
         }
         
         # Compute current output
         actual = tied_featurize(
-            [structure_filtered],
-            device,
-            chain_dict,
-            pssm_dict=pssm_dict
+            [create_protein(structure_filtered, designed_chains, fixed_chains, pssm=pssm)],
+            device
         )
         
         # Load expected output
@@ -328,12 +334,11 @@ class TestRegressionBatch:
         designed_chains = ["H"]
         fixed_chains = ["L"]
         structure_filtered = prepare_structure_for_chains(structure, designed_chains, fixed_chains)
-        protein_name = structure_filtered["name"]
-        chain_dict = {protein_name: (designed_chains, fixed_chains)}
-        batch = [structure_filtered, structure_filtered, structure_filtered]
+        protein = create_protein(structure_filtered, designed_chains, fixed_chains)
+        batch = [protein, protein, protein]
         
         # Compute current output
-        actual = tied_featurize(batch, device, chain_dict)
+        actual = tied_featurize(batch, device)
         
         # Load expected output
         expected = load_regression_data("batch_processing_3_structures")

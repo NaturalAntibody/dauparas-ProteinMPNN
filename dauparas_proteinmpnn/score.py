@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 
 from dauparas_proteinmpnn.featurize import (
-    TiedFeaturizeResult,
+    BatchFeatures,
     featurize_pdb,
     encode_sequence,
 )
@@ -35,7 +35,7 @@ def _scores_from_averaged_logits(S, averaged_logits, mask, positions_to_score):
 
 def score_deterministic(
     model,
-    features: TiedFeaturizeResult,
+    features: BatchFeatures,
     positions_to_score: list[int] | None = None,
 ) -> ScoringResult:
     """Score with fixed sequential decoding order for reproducibility.
@@ -71,14 +71,14 @@ def score_deterministic(
 
 def score_deterministic_batch(
     model,
-    features_list: list[TiedFeaturizeResult],
+    features_list: list[BatchFeatures],
     positions_to_score: list[int] | None = None,
 ) -> list[ScoringResult]:
     """Score multiple feature sets in a single batched forward pass with fixed decoding order.
     
     Args:
         model: The ProteinMPNN model
-        features_list: List of TiedFeaturizeResult objects to score
+        features_list: List of BatchFeatures objects to score
         positions_to_score: Optional list of position indices to score
         
     Returns:
@@ -157,7 +157,7 @@ def score_deterministic_batch(
 
 def score(
     model,
-    features: TiedFeaturizeResult,
+    features: BatchFeatures,
     sample_count: int = 10,
     positions_to_score: list[int] | None = None,
 ) -> ScoringResult:

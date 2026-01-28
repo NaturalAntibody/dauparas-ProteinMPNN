@@ -4,13 +4,13 @@ import torch
 from torch.nn import Module
 from tqdm import tqdm
 
-from dauparas_proteinmpnn.featurize import ALPHABET, TiedFeaturizeResult
+from dauparas_proteinmpnn.featurize import ALPHABET, BatchFeatures
 from dauparas_proteinmpnn.protein_mpnn_utils import _S_to_seq
 
 
 def sample(
     model: Module,
-    features: TiedFeaturizeResult,
+    features: BatchFeatures,
     temperature: float,
     num_seq_per_target: int,
     device: torch.device = torch.device("cuda:0"),

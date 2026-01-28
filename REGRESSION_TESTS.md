@@ -2,7 +2,7 @@
 
 ## Overview
 
-Proper regression tests have been created for `tied_featurize_orig()` function. These tests compare current outputs against saved precomputed values to detect any unintended behavioral changes during refactoring.
+Proper regression tests have been created for `tied_featurize()` function. These tests compare current outputs against saved precomputed values to detect any unintended behavioral changes during refactoring.
 
 ## What Was Created
 
@@ -33,7 +33,6 @@ Proper regression tests have been created for `tied_featurize_orig()` function. 
 
 ### 4. Documentation
 - `tests/regression_data/README.md`: Explains structure, usage, and regeneration process
-- Updated `tests/test_tied_featurize.py` docstring to indicate it's for structural validation only
 
 ## Test Validation
 
@@ -56,7 +55,7 @@ tests/test_tied_featurize_regression.py::TestRegressionBatch::test_batch_process
 
 ### During Testing
 1. Test loads precomputed outputs from `tests/regression_data/<test_case>/`
-2. Test runs `tied_featurize_orig()` with same inputs
+2. Test runs `tied_featurize()` with same inputs
 3. Test compares actual vs expected outputs:
    - **Exact tensor equality** (shape, dtype, values)
    - **Exact array equality** (shape, dtype, values)
@@ -116,13 +115,10 @@ The 8 test cases cover:
 - ✅ PSSM matrices
 - ✅ Batch processing
 
-Additional edge cases are covered by the structural validation tests in `test_tied_featurize.py`.
+## Summary
 
-## Next Steps
-
-You can now safely refactor `tied_featurize_orig()` knowing that:
-1. **8 regression tests** will catch any behavioral changes
-2. **23 structural tests** will validate shapes, dtypes, ranges
+The refactoring of `tied_featurize()` is complete:
+1. **8 regression tests** verify that outputs match original implementation
+2. Function has been consolidated into a single clean API
 3. All outputs are compared against **saved golden values**
-
-Run tests after each refactoring step to ensure correctness is maintained.
+4. Legacy structural tests have been removed in favor of comprehensive regression tests

@@ -1,10 +1,10 @@
 # Regression Test Data
 
-This directory contains precomputed outputs from `tied_featurize_orig()` function for various parameter combinations. These outputs serve as the "golden" reference values for regression testing.
+This directory contains precomputed outputs from `tied_featurize()` function for various parameter combinations. These outputs serve as the "golden" reference values for regression testing.
 
 ## Purpose
 
-During refactoring of `tied_featurize_orig()`, these saved outputs ensure that the refactored code produces **exactly** the same results as the original implementation. Any difference in output values indicates a behavioral change that needs to be investigated.
+During refactoring of `tied_featurize()`, these saved outputs ensure that the refactored code produces **exactly** the same results as the original implementation. Any difference in output values indicates a behavioral change that needs to be investigated.
 
 ## Structure
 
@@ -79,7 +79,7 @@ assert_outputs_equal(actual, expected)
 All tests use the same PDB structure:
 - **File**: `/home/bartosz.janusz/antifold-interface/data/input_files/5GGS_standardized.pdb`
 - **Chains**: H (heavy), L (light), A (antigen)
-- **Note**: Structure is filtered using `select_chains()` before passing to `tied_featurize_orig()`
+- **Note**: Structure is filtered using `select_chains()` before passing to `tied_featurize()`
 
 ## Version Control
 

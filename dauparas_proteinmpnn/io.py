@@ -1,29 +1,67 @@
 import json
+from dataclasses import dataclass
 from Bio.PDB.PDBParser import PDBParser
 from Bio.SeqUtils import IUPACData
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Optional, TextIO
 
 import torch
 
-Structure = dict[str, Any]
 
-def parse_pdb(pdb: Path | TextIO, chain_ids: Optional[list[str]] = None) -> Structure:  # noqa: F821
+@dataclass
+class ChainData:
+    """Data for a single protein chain.
+    
+    Attributes:
+        seq: Amino acid sequence as single-letter codes
+        coords: Dictionary mapping atom names to coordinate lists
+            Keys: 'N', 'CA', 'C', 'O' (for full backbone) or just 'CA' (for CA-only)
+            Values: List of [x, y, z] coordinates for each residue
+    """
+    seq: str
+    coords: dict[str, list[list[float]]]
 
+
+@dataclass
+class Structure:
+    """Protein structure data.
+    
+    Attributes:
+        name: Unique identifier (typically filename)
+        num_of_chains: Number of chains in structure
+        seq: Concatenated sequence of all chains
+        chains: Dictionary mapping chain IDs to ChainData objects
+    """
+    name: str
+    num_of_chains: int
+    seq: str
+    chains: dict[str, ChainData]
+
+def parse_pdb(pdb: Path | TextIO, chain_ids: Optional[list[str]] = None) -> Structure:
+    """Parse a PDB file into a Structure object.
+    
+    Args:
+        pdb: Path to PDB file or file-like object
+        chain_ids: Optional list of chain IDs to parse (None = all chains)
+        
+    Returns:
+        Structure object containing parsed protein data
+    """
     pdb_parser = PDBParser()
     structure = pdb_parser.get_structure("-", pdb)
-    chain_seqs = {}
-    chain_coords = {}
+    chains_data = {}
 
     assert structure is not None, "Failed to parse PDB file."
     for chain in structure.get_chains():
         if chain_ids and chain.id not in chain_ids:
             continue
+        
         coords_N = []
         coords_O = []
         coords_CA = []
         coords_C = []
         seq = []
+        
         for residue in chain:
             seq.append(
                 IUPACData.protein_letters_3to1[residue.get_resname().capitalize()]
@@ -39,30 +77,42 @@ def parse_pdb(pdb: Path | TextIO, chain_ids: Optional[list[str]] = None) -> Stru
                         coords_CA.append(coords)
                     case "C":
                         coords_C.append(coords)
-        chain_coords[f"coords_chain_{chain.id}"] = {
-            f"N_chain_{chain.id}": coords_N,
-            f"O_chain_{chain.id}": coords_O,
-            f"C_chain_{chain.id}": coords_C,
-            f"CA_chain_{chain.id}": coords_CA,
-        }
-        chain_seqs[f"seq_chain_{chain.id}"] = "".join(seq)
+        
+        chains_data[chain.id] = ChainData(
+            seq="".join(seq),
+            coords={
+                "N": coords_N,
+                "CA": coords_CA,
+                "C": coords_C,
+                "O": coords_O,
+            }
+        )
+    
+    return Structure(
+        name=pdb.name if hasattr(pdb, 'name') else str(pdb),
+        num_of_chains=len(chains_data),
+        seq="".join(chain.seq for chain in chains_data.values()),
+        chains=chains_data,
+    )
 
-    return {
-        **chain_seqs,
-        **chain_coords,
-        "seq": "".join(chain_seqs.values()),
-        "name": pdb.name,
-        "num_of_chains": len(chain_seqs),
-    }
 
-
-def select_chains(protein: dict, chains: list[str]) -> dict:
-    res = {"name": protein["name"], "num_of_chains": len(chains), "seq": ""}
-    for chain in chains:
-        res[f"coords_chain_{chain}"] = protein[f"coords_chain_{chain}"]
-        res[f"seq_chain_{chain}"] = protein[f"seq_chain_{chain}"]
-        res["seq"] += protein[f"seq_chain_{chain}"]
-    return res
+def select_chains(protein: Structure, chains: list[str]) -> Structure:
+    """Select specific chains from a Structure.
+    
+    Args:
+        protein: Source Structure object
+        chains: List of chain IDs to select
+        
+    Returns:
+        New Structure containing only the specified chains
+    """
+    selected_chains = {chain_id: protein.chains[chain_id] for chain_id in chains}
+    return Structure(
+        name=protein.name,
+        num_of_chains=len(chains),
+        seq="".join(selected_chains[chain_id].seq for chain_id in chains),
+        chains=selected_chains,
+    )
 
 
 def write_scores(id: str, designed_score: torch.Tensor, global_score: torch.Tensor, out_jsonl: TextIO):
@@ -75,6 +125,7 @@ def write_scores(id: str, designed_score: torch.Tensor, global_score: torch.Tens
 
 
 if __name__ == "__main__":
+    from dataclasses import asdict
 
     pdb_path = Path("1ahw_modelled.pdb")
     chain_ids = ["H", "L"]  # Example chain IDs to select
@@ -83,4 +134,4 @@ if __name__ == "__main__":
         print(f"{pdb_file.name=}")
         print(f"{type(pdb_file)=}")
         protein = parse_pdb(pdb_file, chain_ids=chain_ids)
-        print(json.dumps(protein, indent=2))
+        print(json.dumps(asdict(protein), indent=2))
