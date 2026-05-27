@@ -1,15 +1,13 @@
-
 import numpy as np
 import torch
-from torch.nn import Module
 from tqdm import tqdm
 
 from dauparas_proteinmpnn.featurize import ALPHABET, BatchFeatures
-from dauparas_proteinmpnn.protein_mpnn_utils import _S_to_seq
+from dauparas_proteinmpnn.protein_mpnn_utils import _S_to_seq, ProteinMPNN
 
 
 def sample(
-    model: Module,
+    model: ProteinMPNN,
     features: BatchFeatures,
     temperature: float,
     num_seq_per_target: int,

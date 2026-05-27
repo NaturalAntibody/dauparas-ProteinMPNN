@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from Bio.Align import chain
 import numpy as np
 import torch
 
@@ -22,6 +23,9 @@ class Protein:
         visible_chains: List of chain IDs to keep as context (e.g., ['C'])
         fixed_positions: Optional dict mapping chain IDs to lists of 1-based position indices
             Example: {'A': [1, 2, 3, 10], 'B': [5, 6]}
+        chain_designed_positions: Optional dict mapping chain IDs to lists of designed positions.
+            If provided (and fixed_positions is None), fixed_positions will be computed automatically.
+            Example: {'A': [1, 2, 3], 'B': None}  # None means design all positions
         omit_aa: Optional dict mapping chain IDs to lists of (positions, amino_acids) tuples
             Example: {'A': [(np.array([1, 2, 3]), ['C', 'P']), ...]}
         tied_positions: Optional list of dicts mapping chain IDs to position lists.
@@ -40,27 +44,57 @@ class Protein:
     masked_chains: list[str]
     visible_chains: list[str]
     fixed_positions: dict[str, list[int]] | None = None
+    chain_designed_positions: dict[str, list[int]] | None = None
     omit_aa: dict[str, list[tuple[np.ndarray, list[str]]]] | None = None
     tied_positions: list[dict[str, list[int] | list[list[int]]]] | None = None
     pssm: dict[str, dict[str, np.ndarray] | None] | None = None
     bias_by_res: dict[str, np.ndarray] | None = None
+
+    def __post_init__(self):
+        """Compute fixed_positions from chain_designed_positions if needed."""
+        if self.chain_designed_positions is not None and self.fixed_positions is None:
+            self.fixed_positions = self.compute_fixed_positions()
 
     @property
     def protein_name(self) -> str:
         """Get the protein name from the structure."""
         return self.structure.name
 
+    def compute_fixed_positions(self) -> dict[str, list[int]]:
+        """Convert designed positions to fixed positions dictionary.
 
+        Args:
+            structure: Structure object
+            chain_designed_positions: Dict mapping chain IDs to lists of designed positions or None
 
+        Returns:
+            Dictionary mapping chain IDs to fixed positions
+        """
+        assert self.chain_designed_positions is not None
+        res = {}
+        for chain_id, chain_data in self.structure.chains.items():
+            seq_length = len(chain_data.seq)
+            all_positions = set(range(1, seq_length + 1))
+            if chain_id in self.chain_designed_positions:
+                if chain_id not in self.chain_designed_positions or not self.chain_designed_positions[chain_id]:
+                    designed_positions = all_positions
+                else:
+                    designed_positions = set(self.chain_designed_positions[chain_id])
+                fixed_positions = list(all_positions - designed_positions)
+                res[chain_id] = fixed_positions
+            else:
+                res[chain_id] = list(all_positions)
+        return res
 
 
 @dataclass
 class ItemFeatures:
     """Features extracted from a single protein structure.
-    
+
     This represents the processed data from one protein before batching/padding.
     All arrays are numpy arrays with actual sequence length (no padding).
     """
+
     x: np.ndarray  # [L, 4, 3] or [L, 1, 3] for ca_only - backbone coordinates
     s: np.ndarray  # [L] - amino acid sequence indices
     chain_m: np.ndarray  # [L] - mask for positions to design (1.0 for masked chains)
@@ -134,31 +168,35 @@ def _process_item(
     ca_only: bool = False,
 ) -> ItemFeatures:
     """Process a single Protein object into features.
-    
+
     This function extracts and processes features from one protein,
     handling chain selection, fixed positions, tied positions, and various biases.
-    
+
     Args:
         protein: Protein object containing structure and all configuration parameters
         ca_only: If True, use only CA atoms instead of full backbone
-        
+
     Returns:
         ItemFeatures object containing all processed features
     """
-    
+
     structure = protein.structure
-    masked_chains = protein.masked_chains if protein.masked_chains else list(structure.chains.keys())
+    masked_chains = (
+        protein.masked_chains
+        if protein.masked_chains
+        else list(structure.chains.keys())
+    )
     visible_chains = protein.visible_chains if protein.visible_chains else []
     fixed_positions = protein.fixed_positions
     omit_aa = protein.omit_aa
     tied_positions = protein.tied_positions
     pssm = protein.pssm
     bias_by_res = protein.bias_by_res
-    
+
     masked_chains = sorted(masked_chains)
     visible_chains = sorted(visible_chains)
     all_chains = masked_chains + visible_chains
-    
+
     # Initialize accumulators
     x_chain_list = []
     chain_mask_list = []
@@ -175,30 +213,30 @@ def _process_item(
     masked_list = []
     masked_chain_length_list = []
     global_idx_start_list = [0]
-    
+
     c = 1  # chain encoding counter
-    
+
     # Process each chain
     for chain_id in all_chains:
         is_visible = chain_id in visible_chains
         is_masked = chain_id in masked_chains
-        
+
         letter_list.append(chain_id)
         if is_visible:
             visible_list.append(chain_id)
         if is_masked:
             masked_list.append(chain_id)
-        
+
         # Extract chain sequence and coordinates
         chain_data = structure.chains[chain_id]
         chain_seq = chain_data.seq
         chain_seq = "".join([a if a != "-" else "X" for a in chain_seq])
         chain_length = len(chain_seq)
         global_idx_start_list.append(global_idx_start_list[-1] + chain_length)
-        
+
         if is_masked:
             masked_chain_length_list.append(chain_length)
-        
+
         # Extract coordinates
         if ca_only:
             x_chain = np.array(chain_data.coords["CA"])
@@ -206,18 +244,15 @@ def _process_item(
                 x_chain = x_chain[:, None, :]
         else:
             x_chain = np.stack(
-                [
-                    chain_data.coords[atom]
-                    for atom in ["N", "CA", "C", "O"]
-                ],
+                [chain_data.coords[atom] for atom in ["N", "CA", "C", "O"]],
                 1,
             )
-        
+
         x_chain_list.append(x_chain)
         chain_seq_list.append(chain_seq)
         chain_encoding_list.append(c * np.ones(chain_length))
         c += 1
-        
+
         # Set up masks
         if is_visible:
             chain_mask = np.zeros(chain_length)  # 0.0 for visible chains
@@ -229,10 +264,10 @@ def _process_item(
                 fixed_pos_list = fixed_positions[chain_id]
                 if fixed_pos_list:
                     fixed_position_mask[np.array(fixed_pos_list) - 1] = 0.0
-        
+
         chain_mask_list.append(chain_mask)
         fixed_position_mask_list.append(fixed_position_mask)
-        
+
         # Handle omit_aa
         omit_aa_mask_temp = np.zeros([chain_length, len(ALPHABET)], np.int32)
         if omit_aa is not None and chain_id in omit_aa:
@@ -247,7 +282,7 @@ def _process_item(
                 idx_ = np.array([[a, b] for a in idx_aa for b in aa_idx])
                 omit_aa_mask_temp[idx_[:, 0], idx_[:, 1]] = 1
         omit_aa_mask_list.append(omit_aa_mask_temp)
-        
+
         # Handle PSSM
         pssm_coef_chain = np.zeros(chain_length)
         pssm_bias_chain = np.zeros([chain_length, 21])
@@ -259,13 +294,13 @@ def _process_item(
         pssm_coef_list.append(pssm_coef_chain)
         pssm_bias_list.append(pssm_bias_chain)
         pssm_log_odds_list.append(pssm_log_odds_chain)
-        
+
         # Handle bias_by_res
         if bias_by_res is not None and chain_id in bias_by_res:
             bias_by_res_list.append(bias_by_res[chain_id])
         else:
             bias_by_res_list.append(np.zeros([chain_length, 21]))
-    
+
     # Concatenate all chains
     x = np.concatenate(x_chain_list, 0)
     all_sequence = "".join(chain_seq_list)
@@ -277,7 +312,7 @@ def _process_item(
     pssm_bias_concat = np.concatenate(pssm_bias_list, 0)
     pssm_log_odds_concat = np.concatenate(pssm_log_odds_list, 0)
     bias_by_res_concat = np.concatenate(bias_by_res_list, 0)
-    
+
     # Create residue indices
     L = len(all_sequence)
     residue_idx = np.zeros(L, dtype=np.int32)
@@ -287,12 +322,12 @@ def _process_item(
         l1 += chain_len
         residue_idx[l0:l1] = 100 * chain_idx + np.arange(l0, l1)
         l0 += chain_len
-    
+
     # Handle tied positions
     letter_list_np = np.array(letter_list)
     tied_pos_list_of_lists = []
     tied_beta = np.ones(L)
-    
+
     if tied_positions is not None:
         for tied_item in tied_positions:
             one_list = []
@@ -308,10 +343,10 @@ def _process_item(
                     for v_ in v:
                         one_list.append(start_idx + v_ - 1)
             tied_pos_list_of_lists.append(one_list)
-    
+
     # Convert sequence to indices
     s = np.asarray([ALPHABET.index(a) for a in all_sequence], dtype=np.int32)
-    
+
     return ItemFeatures(
         x=x,
         s=s,
@@ -339,25 +374,25 @@ def _collate_features(
     ca_only: bool = False,
 ) -> BatchFeatures:
     """Collate a list of ItemFeatures into padded batch tensors.
-    
+
     Args:
         features_list: List of ItemFeatures objects
         device: PyTorch device for tensor allocation
         ca_only: If True, coordinates are CA-only [B, L, 3] instead of [B, L, 4, 3]
-        
+
     Returns:
         BatchFeatures dataclass containing batch tensors and metadata
     """
     B = len(features_list)
     lengths = np.array([len(f.s) for f in features_list], dtype=np.int32)
     L_max = max(lengths)
-    
+
     # Allocate batch arrays
     if ca_only:
         X = np.zeros([B, L_max, 1, 3])
     else:
         X = np.zeros([B, L_max, 4, 3])
-    
+
     S = np.zeros([B, L_max], dtype=np.int32)
     residue_idx = -100 * np.ones([B, L_max], dtype=np.int32)
     chain_M = np.zeros([B, L_max], dtype=np.int32)
@@ -368,18 +403,18 @@ def _collate_features(
     pssm_bias_all = np.zeros([B, L_max, 21], dtype=np.float32)
     pssm_log_odds_all = 10000.0 * np.ones([B, L_max, 21], dtype=np.float32)
     bias_by_res_all = np.zeros([B, L_max, 21], dtype=np.float32)
-    
+
     # Accumulate metadata lists
     letter_list_list = []
     visible_list_list = []
     masked_list_list = []
     masked_chain_length_list_list = []
     tied_pos_list_of_lists_list = []
-    
+
     # Pack each item into batch with padding
     for i, features in enumerate(features_list):
         L = len(features.s)
-        
+
         # Pad and store coordinates
         x_pad = np.pad(
             features.x,
@@ -388,37 +423,37 @@ def _collate_features(
             constant_values=(np.nan,),
         )
         X[i, :, :, :] = x_pad
-        
+
         # Store sequences
         S[i, :L] = features.s
-        
+
         # Pad and store masks
         residue_idx[i, :L] = features.residue_idx
         chain_M[i, :L] = features.chain_m
         chain_M_pos[i, :L] = features.chain_m_pos
         chain_encoding_all[i, :L] = features.chain_encoding
         omit_AA_mask[i, :L] = features.omit_aa_mask
-        
+
         # Pad and store PSSM
         pssm_coef_all[i, :L] = features.pssm_coef
         pssm_bias_all[i, :L] = features.pssm_bias
         pssm_log_odds_all[i, :L] = features.pssm_log_odds
-        
+
         # Pad and store bias
         bias_by_res_all[i, :L] = features.bias_by_res
-        
+
         # Store metadata
         letter_list_list.append(features.letter_list)
         visible_list_list.append(features.visible_list)
         masked_list_list.append(features.masked_list)
         masked_chain_length_list_list.append(features.masked_chain_length_list)
         tied_pos_list_of_lists_list.append(features.tied_pos_list_of_lists)
-    
+
     # Handle missing coordinates
     isnan = np.isnan(X)
     mask = np.isfinite(np.sum(X, (2, 3))).astype(np.float32)
     X[isnan] = 0.0
-    
+
     # Create dihedral masks
     jumps = ((residue_idx[:, 1:] - residue_idx[:, :-1]) == 1).astype(np.float32)
     phi_mask = np.pad(jumps, [[0, 0], [1, 0]])
@@ -427,7 +462,7 @@ def _collate_features(
     dihedral_mask = np.concatenate(
         [phi_mask[:, :, None], psi_mask[:, :, None], omega_mask[:, :, None]], -1
     )
-    
+
     # For tied_beta, we need a single array of size L_max
     # We'll collect all tied_beta values and merge them (using max to handle overlaps)
     tied_beta = np.ones(L_max)
@@ -435,28 +470,48 @@ def _collate_features(
         L = len(features.tied_beta)
         # Element-wise max to handle any overlapping tied positions
         tied_beta[:L] = np.maximum(tied_beta[:L], features.tied_beta)
-    
+
     # Convert to PyTorch tensors
     X_tensor = torch.from_numpy(X).to(dtype=torch.float32, device=device)
     S_tensor = torch.from_numpy(S).to(dtype=torch.long, device=device)
     mask_tensor = torch.from_numpy(mask).to(dtype=torch.float32, device=device)
     chain_M_tensor = torch.from_numpy(chain_M).to(dtype=torch.float32, device=device)
-    chain_M_pos_tensor = torch.from_numpy(chain_M_pos).to(dtype=torch.float32, device=device)
-    chain_encoding_tensor = torch.from_numpy(chain_encoding_all).to(dtype=torch.long, device=device)
-    omit_AA_mask_tensor = torch.from_numpy(omit_AA_mask).to(dtype=torch.float32, device=device)
-    residue_idx_tensor = torch.from_numpy(residue_idx).to(dtype=torch.long, device=device)
-    dihedral_mask_tensor = torch.from_numpy(dihedral_mask).to(dtype=torch.float32, device=device)
-    pssm_coef_tensor = torch.from_numpy(pssm_coef_all).to(dtype=torch.float32, device=device)
-    pssm_bias_tensor = torch.from_numpy(pssm_bias_all).to(dtype=torch.float32, device=device)
-    pssm_log_odds_tensor = torch.from_numpy(pssm_log_odds_all).to(dtype=torch.float32, device=device)
-    bias_by_res_tensor = torch.from_numpy(bias_by_res_all).to(dtype=torch.float32, device=device)
-    tied_beta_tensor = torch.from_numpy(tied_beta).to(dtype=torch.float32, device=device)
-    
+    chain_M_pos_tensor = torch.from_numpy(chain_M_pos).to(
+        dtype=torch.float32, device=device
+    )
+    chain_encoding_tensor = torch.from_numpy(chain_encoding_all).to(
+        dtype=torch.long, device=device
+    )
+    omit_AA_mask_tensor = torch.from_numpy(omit_AA_mask).to(
+        dtype=torch.float32, device=device
+    )
+    residue_idx_tensor = torch.from_numpy(residue_idx).to(
+        dtype=torch.long, device=device
+    )
+    dihedral_mask_tensor = torch.from_numpy(dihedral_mask).to(
+        dtype=torch.float32, device=device
+    )
+    pssm_coef_tensor = torch.from_numpy(pssm_coef_all).to(
+        dtype=torch.float32, device=device
+    )
+    pssm_bias_tensor = torch.from_numpy(pssm_bias_all).to(
+        dtype=torch.float32, device=device
+    )
+    pssm_log_odds_tensor = torch.from_numpy(pssm_log_odds_all).to(
+        dtype=torch.float32, device=device
+    )
+    bias_by_res_tensor = torch.from_numpy(bias_by_res_all).to(
+        dtype=torch.float32, device=device
+    )
+    tied_beta_tensor = torch.from_numpy(tied_beta).to(
+        dtype=torch.float32, device=device
+    )
+
     if ca_only:
         X_out = X_tensor[:, :, 0]
     else:
         X_out = X_tensor
-    
+
     return BatchFeatures(
         X_out,
         S_tensor,
@@ -605,11 +660,8 @@ def tied_featurize(
         >>> result = tied_featurize(batch=batch, device=device)
     """
     # Process each protein individually
-    features_list = [
-        _process_item(protein, ca_only=ca_only)
-        for protein in batch
-    ]
-    
+    features_list = [_process_item(protein, ca_only=ca_only) for protein in batch]
+
     # Collate into batch tensors
     return _collate_features(features_list, device, ca_only)
 
@@ -636,34 +688,27 @@ def featurize_structure(
     chain_designed_positions: dict | None = None,
 ) -> BatchFeatures:
     """Featurize a Structure object for ProteinMPNN.
-    
+
     Args:
         structure: Structure object containing protein data
         designed_chains: List of chain IDs to design
         fixed_chains: List of chain IDs to keep fixed as context
         device: PyTorch device for tensors
         chain_designed_positions: Optional dict of designed positions per chain
-        
+
     Returns:
         BatchFeatures with all featurized data
     """
     all_chains = designed_chains + fixed_chains
     structure = select_chains(structure, all_chains)
-    
-    fixed_positions = None
-    if chain_designed_positions is not None:
-        fixed_positions_dict = get_fixed_positions_dict(
-            structure, chain_designed_positions
-        )
-        fixed_positions = fixed_positions_dict[structure.name]
-    
+
     protein = Protein(
         structure=structure,
         masked_chains=designed_chains,
         visible_chains=fixed_chains,
-        fixed_positions=fixed_positions,
+        chain_designed_positions=chain_designed_positions,
     )
-    
+
     return tied_featurize(
         batch=[protein],
         device=device,
@@ -678,31 +723,3 @@ def encode_sequence(features: BatchFeatures, seq: str) -> BatchFeatures:
     # assumes that S and S_input are ALPHABETically sorted for masked_chains
     features.S[:, :input_seq_length] = S_input
     return features
-
-
-def get_fixed_positions_dict(
-    protein: Structure, chain_designed_positions: dict[str, list[int]]
-) -> dict:
-    """Convert designed positions to fixed positions dictionary.
-    
-    Args:
-        protein: Structure object
-        chain_designed_positions: Dict mapping chain IDs to lists of designed positions
-        
-    Returns:
-        Dictionary mapping protein name to dict of chain IDs to fixed positions
-    """
-    res = {}
-    for chain_id, chain_data in protein.chains.items():
-        seq_length = len(chain_data.seq)
-        all_positions = set(range(1, seq_length + 1))
-        if chain_id in chain_designed_positions:
-            if chain_designed_positions[chain_id] is None:
-                designed_positions = all_positions
-            else:
-                designed_positions = set(chain_designed_positions[chain_id])
-            fixed_positions = list(all_positions - designed_positions)
-            res[chain_id] = fixed_positions
-        else:
-            res[chain_id] = list(all_positions)
-    return {protein.name: res}

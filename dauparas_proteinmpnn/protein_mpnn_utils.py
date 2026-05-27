@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 # A number of functions/classes are adopted from: https://github.com/jingraham/neurips19-graph-protein-design
 
 
@@ -272,8 +273,10 @@ def tied_featurize(
     device: torch.device,
     chain_dict: dict[str, tuple[list[str], list[str]]] | None,
     fixed_position_dict: dict[str, dict[str, list[int]]] | None = None,
-    omit_AA_dict: dict[str, dict[str, list[tuple[np.ndarray, list[str]]]]] | None = None,
-    tied_positions_dict: dict[str, list[dict[str, list[int] | list[list[int]]]]] | None = None,
+    omit_AA_dict: dict[str, dict[str, list[tuple[np.ndarray, list[str]]]]]
+    | None = None,
+    tied_positions_dict: dict[str, list[dict[str, list[int] | list[list[int]]]]]
+    | None = None,
     pssm_dict: dict[str, dict[str, dict[str, np.ndarray] | None]] | None = None,
     bias_by_res_dict: dict[str, dict[str, np.ndarray]] | None = None,
     ca_only: bool = False,
@@ -1367,7 +1370,7 @@ class ProteinMPNN(nn.Module):
         residue_idx,
         chain_encoding_all,
         randn,
-        use_input_decoding_order=False,
+        use_constant_decoding_order=False,
         decoding_order=None,
     ):
         """Graph-conditioned sequence model"""
@@ -1392,10 +1395,20 @@ class ProteinMPNN(nn.Module):
         h_EXV_encoder = cat_neighbors_nodes(h_V, h_EX_encoder, E_idx)
 
         chain_M = chain_M * mask  # update chain_M to include missing regions
-        if not use_input_decoding_order:
+        if decoding_order:
+            # Use provided decoding order
+            pass
+        elif use_constant_decoding_order:
+            # Use constant decoding order left-to-right
+            decoding_order = torch.arange(
+                chain_M.shape[1], device=chain_M.device
+            ).unsqueeze(0)
+        else:
+            # Use random decoding order
             decoding_order = torch.argsort(
                 (chain_M + 0.0001) * (torch.abs(randn))
             )  # [numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
+
         mask_size = E_idx.shape[1]
         permutation_matrix_reverse = torch.nn.functional.one_hot(
             decoding_order, num_classes=mask_size
